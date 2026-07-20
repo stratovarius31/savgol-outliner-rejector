@@ -1,0 +1,73 @@
+ # Savgol_outliers.py
+
+"""
+My goal in implementing this program is to re-use my savgol_polyfit_filter_1d.py
+file's functions to help filter the good and the bad data points out of the 
+initial results from Dean Livelybrook's program. 
+
+This idea is like this:
+First, load the raw data as a single column .csv file called "water_levels.csv"
+Then apply the savgol filter to it. 
+Finally integrate Hunter's little piece, to take the two perdictions and go through them together witha  threshold
+"""
+
+from scipy.signal import savgol_filter
+
+from numpy import loadtxt , savetxt
+
+from os.path import splitext
+
+def load_single_column_csv( path ):
+    """
+    Loads a single-column CSV and returns a flat 1D NumPy array.
+    """
+    try:
+        # 'squeeze=True' (in pandas) or 'flatten' (in numpy) ensures a 1D result.
+        # We use ndmin=1 to ensure even a single-value file is an array.
+        data = loadtxt(path, delimiter=",", dtype=float, encoding='utf-8-sig').flatten()
+        
+        print(f"Successfully loaded {len(data)} data points.")
+        return data
+        
+    except FileNotFoundError:
+        print(f"Error: The file at {path} was not found.")
+    except ValueError:
+        print("Error: Could not convert data to floats. Check for headers or text.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+raw_data = load_single_column_csv( "water_levels.csv" )
+
+def savgol_fit( data , window_length, polyorder ):
+    # window_length: 51 (approx the length of your step)
+    # polyorder: 2 (creates the curve)
+    smoothed_data = savgol_filter( data, window_length, polyorder)
+    return smoothed_data
+
+smoothed_data = savgol_fit( raw_data , 51 , 2 )
+
+print( "length of smooth data" , len( smoothed_data ) )
+print( "type of smooth data" , type( smoothed_data ) )
+
+
+def filter_tide_data(raw_data, smoothed_data, threshold = .5):
+    """
+    Filters outliers through threshold, returning outliers as False, inliers as True.
+    """
+    bool_l = []
+        
+    for i in range(len(raw_data)):
+        raw_val = raw_data[i]
+        smooth_val = smoothed_data[i]
+        residual = abs(raw_val - smooth_val)
+                
+        if residual > threshold:
+            print(f"Row {i}: Outlier detected. Difference was {residual}")
+            bool_l.append(False)
+                    
+        else:
+            bool_l.append(True)
+                        
+    return bool_l
+
+filter_tide_data(raw_data, smoothed_data)
