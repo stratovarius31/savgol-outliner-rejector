@@ -1,0 +1,151 @@
+ # sinewave_outliers.py
+
+# import these modules and libraries
+from numpy import loadtxt
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.optimize import curve_fit
+
+
+def load_single_column_csv(path):
+    """
+    Loads a single-column CSV and returns a flat 1D NumPy array.
+    """
+    try:
+        data = loadtxt(path, delimiter=",", dtype=float, encoding="utf-8-sig").flatten()
+        print(f"Successfully loaded {len(data)} data points.")
+        return data
+    except FileNotFoundError:
+        print(f"Error: The file at {path} was not found.")
+    except ValueError:
+        print("Error: Could not convert data to floats. Check for headers or text.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+
+raw_data = load_single_column_csv("water_levels.csv")
+
+
+def tunable_sine(t, A, w, h, z):
+    """
+    An ordinary sine function
+    For a vector t containing the times, where:
+    A is amplitude.
+    w is the angular frequency.
+    h is horizontal offset to right.
+    z is vertical offset.
+    In terms of the approximate water level L, the form of the equation is: 
+    L = amplitude * sine( angular frequency * time + h ) + z
+    Here, the result is a vector containing water levels for those times. 
+    """
+    return A * np.sin(w * t + h) + z
+
+
+def sine_fit(t, U):
+    """
+    Fits 4 parameters (A, w, h, z) to time vector t and water level vector U.
+    """
+    guess_A = (np.max(U) - np.min(U)) / 2.0
+    guess_w = 2 * np.pi / 12.42 / 60.0  # standard tide frequency assuming minutes units
+    guess_h = 0.0
+    guess_z = np.mean(U)
+
+    p0 = [guess_A, guess_w, guess_h, guess_z]
+
+    try:
+        popt, _ = curve_fit(tunable_sine, t, U, p0=p0)
+        return popt
+    except Exception:
+        return p0
+
+
+def sliding_fit_sine(full_t, full_U, wl, mi):
+    """
+    Takes the time series and the raw data.
+    Takes window length wl and increment of motion mi as parameters.
+    """
+    ll, ul = 0, wl
+
+    cur_dat_t, cur_dat_U = full_t[ll:ul], full_U[ll:ul]
+    print("type cur_dat_t", type(cur_dat_t))
+    print("type cur_dat_U", type(cur_dat_U))
+    print("length cur_dat_t", len(cur_dat_t))
+    print("length cur_dat_U", len(cur_dat_U))
+
+    # Initial fit before loop
+    A, w, h, z = sine_fit(cur_dat_t, cur_dat_U)
+    cur_U = tunable_sine(cur_dat_t, A, w, h, z)
+
+    fit_accumulator = np.zeros(len(full_U))
+    counts = np.zeros(len(full_U))
+
+    fit_accumulator[ll:ul] += cur_U
+    counts[ll:ul] += 1
+
+    while ul + mi <= len(full_t):
+        ll += mi
+        ul += mi
+        cur_dat_t, cur_dat_U = full_t[ll:ul], full_U[ll:ul]
+
+        A, w, h, z = sine_fit(cur_dat_t, cur_dat_U)
+        cur_U = tunable_sine(cur_dat_t, A, w, h, z)
+
+        fit_accumulator[ll:ul] += cur_U
+        counts[ll:ul] += 1
+
+    counts[counts == 0] = 1.0
+    smoothed_data = fit_accumulator / counts
+    return smoothed_data
+
+
+full_t = np.arange(len(raw_data), dtype=float)
+full_U = raw_data
+wl = 60  # e.g., 60-minute window
+mi = 1   # step size
+
+smoothed_data = sliding_fit_sine(full_t, full_U, wl, mi)
+
+
+def filter_tide_data(raw_data, smoothed_data, threshold=0.25):
+    """
+    Filters outliers through threshold, returning outliers as False, inliers as True.
+    """
+    bool_l = []
+
+    for i in range(len(raw_data)):
+        raw_val = raw_data[i]
+        smooth_val = smoothed_data[i]
+        residual = abs(raw_val - smooth_val)
+
+        if residual > threshold:
+            print(f"Row {i}: Outlier detected. Difference was {residual}")
+            bool_l.append(False)
+        else:
+            bool_l.append(True)
+
+    return bool_l
+
+
+bool_l = filter_tide_data(raw_data, smoothed_data)
+
+
+def plotting_function(bool_l, raw_data):
+    """
+    Using the boolean list as a mask, make the raw data into filtered data. 
+    Plot both to see the difference, filtered on top
+    """
+    x_axis_1 = range(0, len(raw_data))
+
+    filtered_data = [dat for dat, good in zip(raw_data, bool_l) if good]
+    x_axis_2 = [time for time, good in zip(x_axis_1, bool_l) if good]
+
+    plt.scatter(x_axis_1, raw_data)
+    plt.scatter(x_axis_2, filtered_data)
+    plt.xlabel("Time series")
+    plt.ylabel("Water Level")
+    plt.title("For tuning out the threshold")
+    plt.legend(["Raw Data", "Filtered Data"])
+    plt.show()
+
+
+plotting_function(bool_l, raw_data)
